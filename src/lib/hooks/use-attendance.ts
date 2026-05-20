@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiFetch, apiMutate } from "@/lib/query/fetcher";
+import { queryKeys } from "@/lib/query/keys";
 
 interface AttendanceRecord {
   date: string;
@@ -8,45 +10,29 @@ interface AttendanceRecord {
 }
 
 export function useAttendance() {
-  const [attendance, setAttendance] = useState<AttendanceRecord | null>(null);
-  const [loading, setLoading] = useState(true);
+  const client = useQueryClient();
 
-  const fetchAttendance = useCallback(async () => {
-    try {
-      const response = await fetch("/api/attendance", { cache: "no-store" });
-      const payload = await response.json();
+  const query = useQuery({
+    queryKey: queryKeys.attendance,
+    queryFn: () => apiFetch<AttendanceRecord | null>("/api/attendance"),
+  });
 
-      if (payload.success) {
-        setAttendance(payload.data ?? null);
-      }
-    } catch (error) {
-      console.error("[useAttendance]", error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const checkInMutation = useMutation({
+    mutationFn: () =>
+      apiMutate<AttendanceRecord>("/api/attendance", {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    onSuccess: (data) => {
+      client.setQueryData(queryKeys.attendance, data);
+      void client.invalidateQueries({ queryKey: queryKeys.stats });
+    },
+  });
 
-  useEffect(() => {
-    const id = window.setTimeout(() => {
-      void fetchAttendance();
-    }, 0);
-
-    return () => window.clearTimeout(id);
-  }, [fetchAttendance]);
-
-  const checkIn = async () => {
-    const response = await fetch("/api/attendance", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-
-    const payload = await response.json();
-
-    if (payload.success) {
-      setAttendance(payload.data);
-    }
+  return {
+    attendance: query.data ?? null,
+    loading: query.isLoading,
+    checkIn: () => checkInMutation.mutateAsync(),
+    refresh: query.refetch,
   };
-
-  return { attendance, loading, checkIn, refresh: fetchAttendance };
 }

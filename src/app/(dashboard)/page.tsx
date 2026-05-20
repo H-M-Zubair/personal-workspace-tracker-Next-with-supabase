@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import {
   Bar,
   BarChart,
@@ -23,6 +23,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useStats } from "@/lib/hooks/use-stats";
 import { getTodayLabel } from "@/lib/utils/date";
 import { formatDuration } from "@/lib/utils/time";
+import { useUiStore } from "@/lib/stores/ui-store";
+import WeeklyAbsencesDialog from "@/components/dashboard/weekly-absences-dialog";
 
 type RangeKey = "weekly" | "monthly" | "yearly";
 
@@ -31,38 +33,61 @@ function StatsCards({
   totalSeconds,
   completed,
   totalTasks,
-  excused,
-  missed,
+  absenceCount,
   success,
   streak,
+  onViewAbsences,
 }: {
   range: RangeKey;
   totalSeconds: number;
   completed: number;
   totalTasks: number;
-  excused: number;
-  missed: number;
+  absenceCount: number;
   success: number;
   streak: number;
+  onViewAbsences: () => void;
 }) {
   const rangeLabel = `${range[0].toUpperCase()}${range.slice(1)}`;
   const cards = [
-    { label: "Hours logged today", value: formatDuration(totalSeconds) },
-    { label: `${rangeLabel} completed`, value: `${completed}/${totalTasks}` },
-    { label: `${rangeLabel} absences`, value: excused > 0 || missed > 0 ? `${excused} excused · ${missed} missed` : "None" },
-    { label: `${rangeLabel} success`, value: `${success}%` },
-    { label: "Current streak", value: `${streak} days` },
+    { label: "Hours logged today", value: formatDuration(totalSeconds), action: null as (() => void) | null },
+    { label: `${rangeLabel} completed`, value: `${completed}/${totalTasks}`, action: null },
+    {
+      label: `${rangeLabel} absences`,
+      value: String(absenceCount),
+      action: onViewAbsences,
+    },
+    { label: `${rangeLabel} success`, value: `${success}%`, action: null },
+    { label: "Current streak", value: `${streak} days`, action: null },
   ];
 
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
       {cards.map((card) => (
-        <Card key={card.label}>
+        <Card
+          key={card.label}
+          className={card.action ? "cursor-pointer transition hover:border-blue-300 hover:shadow-md" : undefined}
+          onClick={card.action ?? undefined}
+          role={card.action ? "button" : undefined}
+          tabIndex={card.action ? 0 : undefined}
+          onKeyDown={
+            card.action
+              ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    card.action?.();
+                  }
+                }
+              : undefined
+          }
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-slate-500">{card.label}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-semibold text-slate-900">{card.value}</p>
+            {card.action ? (
+              <p className="mt-1 text-[11px] text-blue-700">Tap to view absence dates</p>
+            ) : null}
           </CardContent>
         </Card>
       ))}
@@ -72,6 +97,9 @@ function StatsCards({
 
 export default function DashboardPage() {
   const { stats, loading } = useStats();
+  const setWeeklyAbsencesOpen = useUiStore((state) => state.setWeeklyAbsencesOpen);
+  const absencesRange = useUiStore((state) => state.absencesRange);
+  const [activeTab, setActiveTab] = useState<RangeKey>("weekly");
   const mounted = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -92,6 +120,7 @@ export default function DashboardPage() {
     if (!stats || !rangeData) return null;
 
     const rangeStats = rangeData[range];
+    const absenceSummary = stats.attendanceAbsences[range];
     const gaugeData = [{ name: "Success", value: rangeStats.successRatio, fill: "#10B981" }];
 
     return (
@@ -101,10 +130,10 @@ export default function DashboardPage() {
           totalSeconds={stats.today.totalSeconds}
           completed={rangeStats.tasksCompleted}
           totalTasks={rangeStats.totalTasks}
-          excused={rangeStats.tasksExcused}
-          missed={rangeStats.tasksMissed}
+          absenceCount={absenceSummary.count}
           success={rangeStats.successRatio}
           streak={stats.today.streak}
+          onViewAbsences={() => setWeeklyAbsencesOpen(true, range)}
         />
 
         <div className="grid gap-4 xl:grid-cols-3">
@@ -245,26 +274,7 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      {!loading && stats && stats.recentAbsences.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent task absences</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-3">
-              {stats.recentAbsences.map((absence) => (
-                <li key={absence.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-sm font-semibold text-slate-900">{absence.taskTitle}</p>
-                  <p className="text-xs text-slate-600">{absence.date}</p>
-                  <p className="mt-1 text-sm text-slate-700">{absence.reason}</p>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <Tabs defaultValue="weekly">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RangeKey)}>
         <TabsList>
           <TabsTrigger value="weekly">Weekly</TabsTrigger>
           <TabsTrigger value="monthly">Monthly</TabsTrigger>
@@ -274,6 +284,8 @@ export default function DashboardPage() {
         <TabsContent value="monthly" className="space-y-4">{renderCharts("monthly")}</TabsContent>
         <TabsContent value="yearly" className="space-y-4">{renderCharts("yearly")}</TabsContent>
       </Tabs>
+
+      <WeeklyAbsencesDialog summary={stats?.attendanceAbsences[absencesRange]} />
     </section>
   );
 }

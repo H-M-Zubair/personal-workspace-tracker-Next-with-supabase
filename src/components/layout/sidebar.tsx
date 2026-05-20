@@ -50,10 +50,23 @@ export default function Sidebar() {
       </nav>
 
       {activeTimer ? (
-        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3">
-          <p className="text-xs font-semibold text-blue-700">Active timer</p>
-          <p className="mt-1 text-sm font-semibold text-slate-900">{activeTimer.taskTitle}</p>
-          <p className="text-xs text-slate-600">{activeTimer.status} - {formatDuration(remaining)}</p>
+        <div className={`mt-4 rounded-lg border p-3 ${activeTimer.status === "completed" ? "border-emerald-300 bg-emerald-50" : "border-blue-200 bg-blue-50"}`}>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className={`text-xs font-semibold ${activeTimer.status === "completed" ? "text-emerald-700" : "text-blue-700"}`}>
+                Active timer
+              </p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{activeTimer.taskTitle}</p>
+              <p className="text-xs text-slate-600">
+                {activeTimer.status === "completed"
+                  ? "Completed"
+                  : `${activeTimer.status} - ${formatDuration(remaining)}`}
+              </p>
+            </div>
+            {activeTimer.status === "completed" ? (
+              <Check className="h-5 w-5 shrink-0 text-emerald-600" aria-label="Completed" />
+            ) : null}
+          </div>
           <div className="mt-2 flex gap-2">
             <Button
               type="button"

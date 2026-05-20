@@ -8,6 +8,7 @@ import {
   DAY_LABELS,
   iterateDatesInclusive,
 } from "@/lib/utils/task-schedule";
+import { buildAttendanceAbsenceDays } from "@/lib/utils/attendance-absence";
 
 const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -124,6 +125,21 @@ function metricsForDateRange(
   };
 }
 
+function attendanceAbsencesForRange(
+  attendanceDates: Set<string>,
+  excusedDates: Map<string, string>,
+  from: Date,
+  to: Date,
+  todayDate: string,
+) {
+  const days = buildAttendanceAbsenceDays(attendanceDates, excusedDates, from, to, todayDate);
+  return {
+    count: days.length,
+    pendingCount: days.filter((day) => day.status === "pending").length,
+    days: days.map(({ date, label, status }) => ({ date, label, status })),
+  };
+}
+
 export async function GET() {
   const { supabase, user } = await getServerUser();
 
@@ -135,8 +151,13 @@ export async function GET() {
   const todayLabel = DAY_LABELS[today.getDay()] ?? "Mon";
   const todayDate = toIsoDate(today);
   const historyStart = toIsoDate(subYears(today, 1));
+  const metadata = user.user_metadata as { full_name?: string };
+  const userName =
+    metadata.full_name?.trim() ||
+    user.email?.split("@")[0] ||
+    "there";
 
-  const [tasksRes, sessionsRes, attendanceRes, absencesRes] = await Promise.all([
+  const [tasksRes, sessionsRes, attendanceRes, absencesRes, attendanceAbsencesRes] = await Promise.all([
     supabase
       .from("tasks")
       .select("id, title, work_days, frequency, single_date, is_active, created_at")
@@ -160,9 +181,22 @@ export async function GET() {
       .gte("date", historyStart)
       .order("date", { ascending: false })
       .limit(500),
+    supabase
+      .from("attendance_absences")
+      .select("date, reason")
+      .eq("user_id", user.id)
+      .gte("date", historyStart)
+      .order("date", { ascending: false })
+      .limit(365),
   ]);
 
-  if (tasksRes.error || sessionsRes.error || attendanceRes.error || absencesRes.error) {
+  if (
+    tasksRes.error ||
+    sessionsRes.error ||
+    attendanceRes.error ||
+    absencesRes.error ||
+    attendanceAbsencesRes.error
+  ) {
     return NextResponse.json({ success: false, error: "Failed to fetch stats" }, { status: 500 });
   }
 
@@ -170,7 +204,10 @@ export async function GET() {
   const sessions = sessionsRes.data ?? [];
   const absences = absencesRes.data ?? [];
   const absenceMap = buildAbsenceMap(absences);
-  const taskTitleById = new Map(tasks.map((task) => [task.id, task.title]));
+  const attendanceDates = new Set((attendanceRes.data ?? []).map((row) => row.date));
+  const excusedDates = new Map(
+    (attendanceAbsencesRes.data ?? []).map((row) => [row.date, row.reason]),
+  );
 
   const todayDayMetrics = computeDayMetrics(todayDate, todayLabel, tasks, sessions, absenceMap);
 
@@ -189,6 +226,12 @@ export async function GET() {
     yearly: metricsForDateRange(subYears(today, 1), today, tasks, sessions, absenceMap),
   };
 
+  const attendanceAbsences: Record<RangeKey, ReturnType<typeof attendanceAbsencesForRange>> = {
+    weekly: attendanceAbsencesForRange(attendanceDates, excusedDates, subDays(today, 6), today, todayDate),
+    monthly: attendanceAbsencesForRange(attendanceDates, excusedDates, subMonths(today, 1), today, todayDate),
+    yearly: attendanceAbsencesForRange(attendanceDates, excusedDates, subYears(today, 1), today, todayDate),
+  };
+
   const streak = (attendanceRes.data ?? []).reduce((count, row, index, rows) => {
     if (index === 0) return 1;
     const previous = new Date(rows[index - 1].date);
@@ -200,23 +243,16 @@ export async function GET() {
     return count;
   }, 0);
 
-  const recentAbsences = absences.slice(0, 12).map((absence) => ({
-    id: absence.id,
-    taskId: absence.task_id,
-    taskTitle: taskTitleById.get(absence.task_id) ?? "Task",
-    date: absence.date,
-    reason: absence.reason,
-  }));
-
   return NextResponse.json({
     success: true,
     data: {
+      userName,
       today: {
         ...todayMetrics,
         streak,
       },
       ranges,
-      recentAbsences,
+      attendanceAbsences,
       charts: {
         weeklyHours: buildWeeklyHours(sessions),
         completionTrend: buildCompletionTrend(tasks, sessions, absenceMap),

@@ -51,10 +51,20 @@ create table if not exists public.task_absences (
   unique (user_id, task_id, date)
 );
 
+create table if not exists public.attendance_absences (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  date date not null,
+  reason text not null,
+  created_at timestamptz not null default now(),
+  unique (user_id, date)
+);
+
 alter table public.tasks enable row level security;
 alter table public.attendance enable row level security;
 alter table public.timer_sessions enable row level security;
 alter table public.task_absences enable row level security;
+alter table public.attendance_absences enable row level security;
 
 drop policy if exists "tasks_owner" on public.tasks;
 create policy "tasks_owner" on public.tasks
@@ -73,6 +83,11 @@ with check (auth.uid() = user_id);
 
 drop policy if exists "task_absences_owner" on public.task_absences;
 create policy "task_absences_owner" on public.task_absences
+for all using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "attendance_absences_owner" on public.attendance_absences;
+create policy "attendance_absences_owner" on public.attendance_absences
 for all using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
@@ -104,12 +119,14 @@ grant select, insert, update, delete on table public.tasks to authenticated;
 grant select, insert, update, delete on table public.attendance to authenticated;
 grant select, insert, update, delete on table public.timer_sessions to authenticated;
 grant select, insert, update, delete on table public.task_absences to authenticated;
+grant select, insert, update, delete on table public.attendance_absences to authenticated;
 
 -- Optional read-only access for anon (no writes).
 grant select on table public.tasks to anon;
 grant select on table public.attendance to anon;
 grant select on table public.timer_sessions to anon;
 grant select on table public.task_absences to anon;
+grant select on table public.attendance_absences to anon;
 
 -- Service role grants for admin scripts/seeding.
 grant usage on schema public to service_role;
@@ -117,3 +134,4 @@ grant select, insert, update, delete on table public.tasks to service_role;
 grant select, insert, update, delete on table public.attendance to service_role;
 grant select, insert, update, delete on table public.timer_sessions to service_role;
 grant select, insert, update, delete on table public.task_absences to service_role;
+grant select, insert, update, delete on table public.attendance_absences to service_role;

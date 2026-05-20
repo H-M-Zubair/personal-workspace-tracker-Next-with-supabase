@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiFetch } from "@/lib/query/fetcher";
+import { queryKeys } from "@/lib/query/keys";
 
 type RangeKey = "weekly" | "monthly" | "yearly";
 
@@ -13,7 +15,18 @@ interface RangeMetrics {
   successRatio: number;
 }
 
-interface DashboardStats {
+export interface AttendanceAbsenceSummary {
+  count: number;
+  pendingCount: number;
+  days: Array<{
+    date: string;
+    label: string;
+    status: "excused" | "pending";
+  }>;
+}
+
+export interface DashboardStats {
+  userName: string;
   today: {
     totalSeconds: number;
     tasksCompleted: number;
@@ -24,13 +37,7 @@ interface DashboardStats {
     streak: number;
   };
   ranges: Record<RangeKey, RangeMetrics>;
-  recentAbsences: Array<{
-    id: string;
-    taskId: string;
-    taskTitle: string;
-    date: string;
-    reason: string;
-  }>;
+  attendanceAbsences: Record<RangeKey, AttendanceAbsenceSummary>;
   charts: {
     weeklyHours: Array<{ label: string; hours: number }>;
     completionTrend: Array<{
@@ -46,27 +53,19 @@ interface DashboardStats {
 }
 
 export function useStats() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const query = useQuery({
+    queryKey: queryKeys.stats,
+    queryFn: () => apiFetch<DashboardStats>("/api/stats"),
+  });
 
-  useEffect(() => {
-    async function loadStats() {
-      try {
-        const response = await fetch("/api/stats", { cache: "no-store" });
-        const payload = await response.json();
+  return {
+    stats: query.data ?? null,
+    loading: query.isLoading,
+    refresh: query.refetch,
+  };
+}
 
-        if (payload.success) {
-          setStats(payload.data);
-        }
-      } catch (error) {
-        console.error("[useStats]", error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    void loadStats();
-  }, []);
-
-  return { stats, loading };
+export function useInvalidateStats() {
+  const client = useQueryClient();
+  return () => client.invalidateQueries({ queryKey: queryKeys.stats });
 }

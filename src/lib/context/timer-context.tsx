@@ -1,6 +1,9 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { queryKeys } from "@/lib/query/keys";
 
 type ActiveTimerStatus = "running" | "paused" | "completed";
 
@@ -18,15 +21,29 @@ type TimerContextValue = {
   loading: boolean;
   actionLoading: boolean;
   refreshActiveTimer: () => Promise<void>;
-  runTimerAction: (action: "pause" | "resume" | "complete") => Promise<void>;
+  runTimerAction: (action: "pause" | "resume" | "complete", options?: { silent?: boolean }) => Promise<void>;
+  extendPlannedSeconds: (seconds: number) => void;
 };
 
 const TimerContext = createContext<TimerContextValue | null>(null);
 
+function pauseTimerKeepalive(taskId: string) {
+  const body = JSON.stringify({ action: "pause", taskId });
+  void fetch("/api/timers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: true,
+  }).catch(() => {});
+}
+
 export function TimerProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const autoCompletedRef = useRef(false);
+  const pausingRef = useRef(false);
 
   const refreshActiveTimer = useCallback(async () => {
     try {
@@ -75,6 +92,10 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
   }, [activeTimer]);
 
   useEffect(() => {
+    autoCompletedRef.current = false;
+  }, [activeTimer?.taskId, activeTimer?.id]);
+
+  useEffect(() => {
     const onFocus = () => {
       void refreshActiveTimer();
     };
@@ -94,25 +115,7 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [refreshActiveTimer]);
 
-  useEffect(() => {
-    if (activeTimer?.status !== "running") {
-      return;
-    }
-
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      // Modern browsers show a generic warning message.
-      event.preventDefault();
-      event.returnValue = "";
-    };
-
-    window.addEventListener("beforeunload", onBeforeUnload);
-
-    return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
-    };
-  }, [activeTimer?.status]);
-
-  const runTimerAction = useCallback(async (action: "pause" | "resume" | "complete") => {
+  const runTimerAction = useCallback(async (action: "pause" | "resume" | "complete", options?: { silent?: boolean }) => {
     if (!activeTimer) return;
 
     try {
@@ -132,16 +135,87 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
       }
 
       await refreshActiveTimer();
+      if (action === "complete") {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.history }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.stats }),
+        ]);
+        if (!options?.silent) {
+          toast.success("Task marked as completed.");
+        }
+      }
     } catch (error) {
       console.error("[TimerContext] action", error);
     } finally {
       setActionLoading(false);
     }
-  }, [activeTimer, refreshActiveTimer]);
+  }, [activeTimer, queryClient, refreshActiveTimer]);
+
+  const pauseActiveTimer = useCallback(async () => {
+    if (!activeTimer || activeTimer.status !== "running" || pausingRef.current) return;
+
+    pausingRef.current = true;
+    setActiveTimer((prev) => (prev ? { ...prev, status: "paused" } : prev));
+
+    try {
+      await runTimerAction("pause");
+    } finally {
+      pausingRef.current = false;
+    }
+  }, [activeTimer, runTimerAction]);
+
+  const extendPlannedSeconds = useCallback((seconds: number) => {
+    autoCompletedRef.current = false;
+    setActiveTimer((prev) =>
+      prev ? { ...prev, plannedSeconds: prev.plannedSeconds + seconds } : prev,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (activeTimer?.status !== "running") return;
+
+    const taskId = activeTimer.taskId;
+
+    const onPageHide = () => {
+      pauseTimerKeepalive(taskId);
+      setActiveTimer((prev) => (prev?.taskId === taskId ? { ...prev, status: "paused" } : prev));
+    };
+
+    const onVisibilityHidden = () => {
+      if (document.visibilityState === "hidden") {
+        void pauseActiveTimer();
+      }
+    };
+
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityHidden);
+
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityHidden);
+    };
+  }, [activeTimer?.status, activeTimer?.taskId, pauseActiveTimer]);
+
+  useEffect(() => {
+    if (
+      !activeTimer ||
+      activeTimer.status !== "running" ||
+      activeTimer.plannedSeconds <= 0 ||
+      activeTimer.elapsedSeconds < activeTimer.plannedSeconds ||
+      autoCompletedRef.current
+    ) {
+      return;
+    }
+
+    autoCompletedRef.current = true;
+    void runTimerAction("complete", { silent: true }).then(() => {
+      toast.success("Timer finished — task marked as completed.");
+    });
+  }, [activeTimer, runTimerAction]);
 
   const value = useMemo(
-    () => ({ activeTimer, loading, actionLoading, refreshActiveTimer, runTimerAction }),
-    [activeTimer, loading, actionLoading, refreshActiveTimer, runTimerAction],
+    () => ({ activeTimer, loading, actionLoading, refreshActiveTimer, runTimerAction, extendPlannedSeconds }),
+    [activeTimer, loading, actionLoading, refreshActiveTimer, runTimerAction, extendPlannedSeconds],
   );
 
   return <TimerContext.Provider value={value}>{children}</TimerContext.Provider>;

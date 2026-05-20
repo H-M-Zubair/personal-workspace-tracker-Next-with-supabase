@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiFetch } from "@/lib/query/fetcher";
+import { queryKeys } from "@/lib/query/keys";
 
 export interface HistoryPayload {
   attendance: Array<{ date: string; checked_in_at: string }>;
@@ -22,31 +24,19 @@ export interface HistoryPayload {
 }
 
 export function useHistory() {
-  const [history, setHistory] = useState<HistoryPayload | null>(null);
-  const [loading, setLoading] = useState(true);
+  const client = useQueryClient();
 
-  const refresh = useCallback(async () => {
-    try {
-      const response = await fetch("/api/history", { cache: "no-store" });
-      const payload = await response.json();
+  const query = useQuery({
+    queryKey: queryKeys.history,
+    queryFn: () => apiFetch<HistoryPayload>("/api/history"),
+  });
 
-      if (payload.success) {
-        setHistory(payload.data);
-      }
-    } catch (error) {
-      console.error("[useHistory]", error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const id = window.setTimeout(() => {
-      void refresh();
-    }, 0);
-
-    return () => window.clearTimeout(id);
-  }, [refresh]);
-
-  return { history, loading, refresh };
+  return {
+    history: query.data ?? null,
+    loading: query.isLoading,
+    refresh: async () => {
+      await query.refetch();
+      await client.invalidateQueries({ queryKey: queryKeys.stats });
+    },
+  };
 }

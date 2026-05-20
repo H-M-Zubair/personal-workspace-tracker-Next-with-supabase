@@ -52,3 +52,8 @@ export const taskAbsenceSchema = z.object({
   date: z.string().date(),
   reason: z.string().trim().min(5).max(500),
 });
+
+export const attendanceAbsenceSchema = z.object({
+  date: z.string().date(),
+  reason: z.string().trim().min(5).max(500),
+});

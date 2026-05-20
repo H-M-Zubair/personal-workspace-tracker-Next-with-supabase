@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { format } from "date-fns";
+import { CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import TimerPanel from "@/components/schedule/timer-panel";
 import { useAttendance } from "@/lib/hooks/use-attendance";
@@ -266,9 +267,16 @@ export default function TodayPage() {
             const status = taskStatusMap.get(task.id) ?? "not_started";
 
             return (
-              <article key={task.id} className={`rounded-xl border bg-white p-4 shadow-sm ${isActive ? "border-blue-400" : "border-slate-200"}`}>
-                <h3 className="font-semibold text-slate-900">{task.title}</h3>
-                <p className="text-sm text-slate-600">Planned {task.planned_hours}h {task.planned_minutes}m</p>
+              <article key={task.id} className={`rounded-xl border bg-white p-4 shadow-sm ${isActive ? "border-blue-400" : status === "completed" ? "border-emerald-300" : "border-slate-200"}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="font-semibold text-slate-900">{task.title}</h3>
+                    <p className="text-sm text-slate-600">Planned {task.planned_hours}h {task.planned_minutes}m</p>
+                  </div>
+                  {status === "completed" ? (
+                    <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-600" aria-label="Completed" />
+                  ) : null}
+                </div>
                 {isActive ? <p className="mt-1 text-xs font-medium text-blue-700">Active timer task</p> : null}
                 {!isActive && status === "completed" ? <p className="mt-1 text-xs font-medium text-emerald-700">Completed</p> : null}
                 {!isActive && status === "paused" ? <p className="mt-1 text-xs font-medium text-amber-700">Paused</p> : null}
